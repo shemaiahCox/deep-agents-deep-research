@@ -1,14 +1,9 @@
-# ---- Deep Research Agent ----
-# Builds a deep agent that delegates web research and writes a cited report.
-
-# -- Imports --
-
 from datetime import datetime
 import os
 from typing import Annotated, Literal
 
-from deepagents import create_deep_agent
 import httpx
+from deepagents import create_deep_agent
 from langchain.agents.middleware import TodoListMiddleware
 from langchain.chat_models import init_chat_model
 from langchain.messages import HumanMessage
@@ -16,11 +11,9 @@ from langchain.tools import InjectedToolArg, tool
 from markdownify import markdownify
 from tavily import TavilyClient
 
-# -- Search client --
+# 1. Custom Tools for Web Search and Content Extraction
 
 tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
-
-# ---- Web search tools ----
 
 
 def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
@@ -40,13 +33,10 @@ def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
 def tavily_search(
     query: str,
     max_results: Annotated[int, InjectedToolArg] = 1,
-    topic: Annotated[
-        Literal["general", "news", "finance"], InjectedToolArg
-    ] = "general",
+    topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
 ) -> str:
-    """Search the web for information on a given query.
-
-    Uses Tavily to discover relevant URLs, then fetches and returns full webpage content as markdown.
+    """Search the web for information on a given query. Uses Tavily to discover relevant URLs,
+    then fetches and returns full webpage content as markdown.
 
     Args:
         query: Search query to execute
@@ -66,19 +56,14 @@ def tavily_search(
         url = result["url"]
         title = result["title"]
         content = fetch_webpage_content(url)
-        result_texts.append(f"## {title}\n**URL:** {url}\n\n{content}\n---")
-
-    return f"Found {len(result_texts)} result(s) for '{query}':\n\n" + "\n".join(
-        result_texts
-    )
+        result_texts.append(f"## {title}\n **URL:** {url}\n\n{content}\n---")
+    return f"Found {len(result_texts)} result(s) for '{query}': \n\n" + "\n".join(result_texts)
 
 
-# ---- Research instructions ----
+# 2. Prompts and System Instructions
 
 RESEARCH_WORKFLOW_INSTRUCTIONS = """# Research Workflow
-
 Follow this workflow for all research requests:
-
 1. **Plan**: Create a todo list with write_todos to break down the research into focused tasks
 2. **Save the request**: Use write_file() to save the user's research question to `/research_request.md`
 3. **Research**: Delegate research tasks to sub-agents using the task() tool - ALWAYS use sub-agents for research, never conduct research yourself
@@ -93,7 +78,6 @@ Follow this workflow for all research requests:
 - Each sub-agent should research one specific aspect and return findings
 
 ## Report Writing Guidelines
-
 When writing the final report to `/final_report.md`, follow these structure patterns:
 
 **For comparisons:**
@@ -103,8 +87,7 @@ When writing the final report to `/final_report.md`, follow these structure patt
 4. Detailed comparison
 5. Conclusion
 
-**For lists/rankings:**
-Simply list items with details - no introduction needed:
+**For lists/rankings:** Simply list items with details - no introduction needed:
 1. Item 1 with explanation
 2. Item 2 with explanation
 3. Item 3 with explanation
@@ -130,24 +113,14 @@ Simply list items with details - no introduction needed:
 - End report with ### Sources section listing each numbered source
 - Number sources sequentially without gaps (1,2,3,4...)
 - Format: [1] Source Title: URL (each on separate line for proper list rendering)
-- Example:
+- Example: Some important finding [1]. Another key insight [2].
 
- Some important finding [1]. Another key insight [2].
-
- ### Sources
- [1] AI Research Paper: https://example.com/paper
- [2] Industry Analysis: https://example.com/analysis
+### Sources
+[1] AI Research Paper: https://example.com/paper
+[2] Industry Analysis: https://example.com/analysis
 """
 
-RESEARCHER_INSTRUCTIONS = """You are a research assistant conducting research on the user's input topic. For context, today's date is {date}.
-
-Your job is to use tools to gather information about the user's input topic.
-You can use the tavily_search tool to find resources that can help answer the research question.
-You can call it in series or in parallel, your research is conducted in a tool-calling loop.
-
-You have access to the tavily_search tool for conducting web searches.
-
-Think like a human researcher with limited time. Follow these steps:
+RESEARCHER_INSTRUCTIONS = """You are a research assistant conducting research on the user's input topic. For context, today's date is {date}. Your job is to use tools to gather information about the user's input topic. You can use the tavily_search tool to find resources that can help answer the research question. You can call it in series or in parallel, your research is conducted in a tool-calling loop. You have access to the tavily_search tool for conducting web searches. Think like a human researcher with limited time. Follow these steps:
 
 1. **Read the question carefully** - What specific information does the user need?
 2. **Start with broader searches** - Use broad, comprehensive queries first
@@ -168,7 +141,6 @@ Think like a human researcher with limited time. Follow these steps:
 After each search, assess results before continuing: What key information did I find? What's missing? Do I have enough to answer? Should I search more or provide my answer?
 
 When providing your findings back to the orchestrator:
-
 1. **Structure your response**: Organize findings with clear headings and detailed explanations
 2. **Cite sources inline**: Use [1], [2], [3] format when referencing information from your searches
 3. **Include Sources section**: End with ### Sources listing each numbered source with title and URL
@@ -185,11 +157,9 @@ The orchestrator will consolidate citations from all sub-agents into the final r
 """
 
 SUBAGENT_DELEGATION_INSTRUCTIONS = """# Sub-Agent Research Coordination
-
 Your role is to coordinate research by delegating tasks from your TODO list to specialized research sub-agents.
 
 ## Delegation Strategy
-
 **DEFAULT: Start with 1 sub-agent** for most queries:
 - "What is quantum computing?" -> 1 sub-agent (general overview)
 - "List the top 10 coffee shops in San Francisco" -> 1 sub-agent
@@ -219,13 +189,13 @@ Your role is to coordinate research by delegating tasks from your TODO list to s
 ## Research Limits
 - Stop after {max_researcher_iterations} delegation rounds if you haven't found adequate sources
 - Stop when you have sufficient information to answer comprehensively
-- Bias towards focused research over exhaustive exploration"""
+- Bias towards focused research over exhaustive exploration
+"""
 
-# ---- Build the research agent ----
+# 3. Agent Configuration & Initialization
 
 max_concurrent_research_units = 3
 max_researcher_iterations = 3
-
 current_date = datetime.now().strftime("%Y-%m-%d")
 
 INSTRUCTIONS = (
@@ -256,7 +226,7 @@ agent = create_deep_agent(
     middleware=[TodoListMiddleware()],
 )
 
-# ---- Run the agent ----
+# 4. Agent Execution Example
 
 if __name__ == "__main__":
     result = agent.invoke(
@@ -268,7 +238,6 @@ if __name__ == "__main__":
             ]
         }
     )
-
     for msg in result.get("messages", []):
         if hasattr(msg, "content") and msg.content:
             print(msg.content)
